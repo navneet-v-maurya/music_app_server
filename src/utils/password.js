@@ -3,7 +3,7 @@ import bcrypt from "bcrypt";
 
 export const encrypt = async (text) => {
   try {
-    const salt = await bcrypt.genSalt(Number(process.env.SALT));
+    const salt = bcrypt.genSalt(Number(process.env.SALT));
     const hashed_text = await bcrypt.hash(text, salt);
     return hashed_text;
   } catch (error) {
