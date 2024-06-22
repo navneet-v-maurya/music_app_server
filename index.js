@@ -38,8 +38,10 @@ app.get("/health_check", (req, res) => {
 });
 
 //routes import
+import auth_route from "./src/routes/auth.js";
 
 //routes
+app.use("/auth", auth_route);
 
 //server
 app.listen(process.env.PORT, () => {
