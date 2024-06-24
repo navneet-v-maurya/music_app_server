@@ -5,6 +5,7 @@ import User from "../models/postgres/User.js";
 import Otp from "../models/mongodb/Otp.js";
 import { Op } from "sequelize";
 import { send_email, send_message_to_phone } from "../utils/send_messages.js";
+import { combineTableNames } from "sequelize/lib/utils";
 
 const email_regex = /^[a-z0-9]+@[a-z]+\.[a-z]{2,3}$/;
 const phone_number_regex = /^(\+?\d{1,2}\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}$/;
@@ -29,7 +30,7 @@ export const generate_otp_register = async (data, cb) => {
       where: { [Op.or]: [{ email: data.unique_id }, { phone_number: data.unique_id }] },
     });
 
-    if (found && found.unique_id === data.unique_id)
+    if (found && (found.email === data.unique_id || found.phone_number === data.unique_id))
       throw new Error("Email or Phone Already Exists");
 
     const hashed_pass = await encrypt(data.password);
@@ -229,6 +230,65 @@ export const register_user = async (data, cb) => {
           success: false,
           status: 400,
           action: "generate_otp",
+          message: err.message,
+        })
+        .toJS()
+    );
+  }
+};
+
+export const sign_in = async (data, cb) => {
+  try {
+    if (!data.unique_id || !data.password) throw new Error("Param Missing");
+
+    const user_found = await User.findOne({
+      where: {
+        [Op.or]: [{ email: data.unique_id }, { phone_number: data.unique_id }],
+      },
+    });
+
+    if (!user_found) throw new Error("Invalid Email or Phone Number");
+
+    const valiid_pass = await compare(data.password, user_found.password);
+
+    if (!valiid_pass) throw new Error("Invalid Password");
+
+    const { password, ...rest } = user_found.dataValues;
+
+    const token = create_token({
+      _id: rest.id,
+      name: rest.name,
+      email: rest.email,
+      age: rest.age,
+      gender: rest.gender,
+      phone_number: rest.phone_number,
+      is_admin: rest.is_admin,
+      is_active: rest.is_active,
+    });
+
+    return cb(
+      null,
+      response_structure
+        .merge({
+          success: true,
+          status: 200,
+          action: "sign_in",
+          message: "User Logged In Successfully",
+          data: {
+            token,
+            user: rest,
+          },
+        })
+        .toJS()
+    );
+  } catch (err) {
+    console.log(err);
+    return cb(
+      response_structure
+        .merge({
+          success: false,
+          status: 400,
+          action: "sign_in",
           message: err.message,
         })
         .toJS()
