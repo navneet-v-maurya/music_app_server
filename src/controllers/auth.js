@@ -1,18 +1,26 @@
+//model imports
+import User from "../models/postgres/User.js";
+import Otp from "../models/mongodb/Otp.js";
+
+//utils import
 import response_structure from "../utils/response.js";
 import { create_token, decode_token } from "../utils/web_tokens.js";
 import { compare, encrypt, generate_otp } from "../utils/password.js";
-import User from "../models/postgres/User.js";
-import Otp from "../models/mongodb/Otp.js";
-import { Op } from "sequelize";
 import { send_email, send_message_to_phone } from "../utils/send_messages.js";
-import { combineTableNames } from "sequelize/lib/utils";
 
-const email_regex = /^[a-z0-9]+@[a-z]+\.[a-z]{2,3}$/;
-const phone_number_regex = /^(\+?\d{1,2}\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}$/;
+//module imports
+import { Op } from "sequelize";
+
+// constant variables
+const email_regex = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+//   /^(\+?\d{1,2}\s?)?(\(?\d{3}\)?[\s.-]?)?\d{3}[\s.-]?\d{4}$/
+//   /^(\+91|\+91\-|0)?[789]\d{9}$/
+const phone_number_regex = /^[0]?[6789]\d{9}$/;
 
 export const generate_otp_register = async (data, cb) => {
   try {
-    if (!data.name || !data.unique_id || !data.password) throw new Error("Params Missing");
+    if (!data.name || !data.unique_id || !data.password)
+      throw new Error("Params Missing");
 
     const user_data = {
       name: data.name,
@@ -27,10 +35,15 @@ export const generate_otp_register = async (data, cb) => {
     }
 
     const found = await User.findOne({
-      where: { [Op.or]: [{ email: data.unique_id }, { phone_number: data.unique_id }] },
+      where: {
+        [Op.or]: [{ email: data.unique_id }, { phone_number: data.unique_id }],
+      },
     });
 
-    if (found && (found.email === data.unique_id || found.phone_number === data.unique_id))
+    if (
+      found &&
+      (found.email === data.unique_id || found.phone_number === data.unique_id)
+    )
       throw new Error("Email or Phone Already Exists");
 
     const hashed_pass = await encrypt(data.password);
@@ -105,7 +118,7 @@ export const resend_otp = async (data, cb) => {
       token: data.token,
       unique_id: user_data.email ? user_data.email : user_data.phone_number,
       is_used: false,
-    }).sort({ updated_at: -1 });
+    }).sort({ updatedAt: -1 });
 
     if (!found_otp) throw new Error("Invalid token");
 
@@ -181,7 +194,7 @@ export const register_user = async (data, cb) => {
     const found_otp = await Otp.findOne({
       unique_id: user_data.email ? user_data.email : user_data.phone_number,
       is_used: false,
-    }).sort({ updated_at: -1 });
+    }).sort({ updatedAt: -1 });
 
     if (!found_otp) throw new Error("No OTP Found");
 
@@ -190,14 +203,18 @@ export const register_user = async (data, cb) => {
     if (!otp_matched) throw new Error("Wrong OTP");
 
     const [new_user, updated_otp] = await Promise.all([
-      User.create({ ...user_data, password: found_otp.temp_pass }),
+      User.create({
+        ...user_data,
+        password: found_otp.temp_pass,
+        unique_id: user_data.email ? "email" : "phone_number",
+      }),
       Otp.findByIdAndUpdate(found_otp._id, { is_used: true }),
     ]);
 
     const { password, ...rest } = new_user.dataValues;
 
     const token = create_token({
-      _id: rest.id,
+      id: rest.id,
       name: rest.name,
       email: rest.email,
       age: rest.age,
@@ -205,6 +222,7 @@ export const register_user = async (data, cb) => {
       phone_number: rest.phone_number,
       is_admin: rest.is_admin,
       is_active: rest.is_active,
+      unique_id: rest.email ? "email" : "phone_number",
     });
 
     return cb(
@@ -256,7 +274,7 @@ export const sign_in = async (data, cb) => {
     const { password, ...rest } = user_found.dataValues;
 
     const token = create_token({
-      _id: rest.id,
+      id: rest.id,
       name: rest.name,
       email: rest.email,
       age: rest.age,
@@ -264,6 +282,7 @@ export const sign_in = async (data, cb) => {
       phone_number: rest.phone_number,
       is_admin: rest.is_admin,
       is_active: rest.is_active,
+      unique_id: rest.unique_id,
     });
 
     return cb(
@@ -311,7 +330,9 @@ export const generate_otp_sign_in = async (data, cb) => {
     }
 
     const found = await User.findOne({
-      where: { [Op.or]: [{ email: data.unique_id }, { phone_number: data.unique_id }] },
+      where: {
+        [Op.or]: [{ email: data.unique_id }, { phone_number: data.unique_id }],
+      },
     });
 
     if (!found) throw new Error("Email or Phone Not Found");
@@ -384,7 +405,7 @@ export const sign_in_by_otp = async (data, cb) => {
     const found_otp = await Otp.findOne({
       unique_id: user_data.email ? user_data.email : user_data.phone_number,
       is_used: false,
-    }).sort({ updated_at: -1 });
+    }).sort({ updatedAt: -1 });
 
     if (!found_otp) throw new Error("No OTP Found");
 
@@ -392,15 +413,22 @@ export const sign_in_by_otp = async (data, cb) => {
 
     if (!otp_matched) throw new Error("Wrong OTP");
 
+    const search_data = {};
+    if (user_data.email) {
+      search_data.email = user_data.email;
+    } else {
+      user.search_data = user_data.phone_number;
+    }
+
     const [user, updated_otp] = await Promise.all([
-      User.findOne({ where: user_data }),
+      User.findOne({ where: search_data }),
       Otp.findByIdAndUpdate(found_otp._id, { is_used: true }),
     ]);
 
     const { password, ...rest } = user.dataValues;
 
     const token = create_token({
-      _id: rest.id,
+      id: rest.id,
       name: rest.name,
       email: rest.email,
       age: rest.age,
@@ -408,6 +436,7 @@ export const sign_in_by_otp = async (data, cb) => {
       phone_number: rest.phone_number,
       is_admin: rest.is_admin,
       is_active: rest.is_active,
+      unique_id: rest.unique_id,
     });
 
     return cb(
